@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auth System with SheetDB</title>
+
+  <!-- Usar js-cookie para manejar cookies -->
+  <script src="https://cdn.jsdelivr.net/npm/js-cookie@3.0.1/dist/js.cookie.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #121212;
+      color: white;
+      margin: 50px;
+      text-align: center;
+    }
+
+    h1 {
+      margin-bottom: 30px;
+    }
+
+    .form-container {
+      max-width: 400px;
+      margin: 0 auto;
+      padding: 20px;
+      border: 1px solid #333;
+      border-radius: 10px;
+      background-color: #1e1e1e;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    input {
+      display: block;
+      width: 100%;
+      margin-bottom: 15px;
+      padding: 10px;
+      border: 1px solid #444;
+      border-radius: 5px;
+      background-color: #333;
+      color: white;
+    }
+
+    input:focus {
+      border-color: #007bff;
+      outline: none;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    .message {
+      margin-top: 15px;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .toggle-button {
+      display: block;
+      margin-top: 20px;
+      color: #007bff;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Authentication System</h1>
+
+  <!-- Registro -->
+  <div class="form-container" id="registerForm">
+    <h2>Register</h2>
+    <input type="text" id="registerUsername" placeholder="Username" required>
+    <input type="email" id="registerEmail" placeholder="Email" required>
+    <input type="password" id="registerPassword" placeholder="Password" required>
+    <button id="registerButton">Register</button>
+    <div class="message" id="registerMessage"></div>
+    <button class="toggle-button" id="showLoginForm">Already have an account? Login</button>
+  </div>
+
+  <!-- Login -->
+  <div class="form-container" id="loginForm" style="display: none;">
+    <h2>Login</h2>
+    <input type="text" id="loginUsername" placeholder="Username" required>
+    <input type="password" id="loginPassword" placeholder="Password" required>
+    <button id="loginButton">Login</button>
+    <div class="message" id="loginMessage"></div>
+    <button class="toggle-button" id="showRegisterForm">Don't have an account? Register</button>
+  </div>
+
+  <script>
+    const SHEETDB_ENDPOINT = "https://sheetdb.io/api/v1/fnpyggtmynrr3"; // Reemplaza con tu endpoint correcto
+    const AUTH_TOKEN = ""; // Si no usas token, déjalo vacío
+
+    // Función para hash de contraseñas utilizando Web Crypto API
+    async function hashPassword(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', data); // Utiliza SHA-256
+      const hashArray = Array.from(new Uint8Array(hashBuffer)); // Convierte el buffer en array
+      const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join(''); // Convierte a hex
+      return hashHex;
+    }
+
+    // Función de registro
+    async function registerUser(username, email, password) {
+      try {
+        const existingUsers = await fetch(`${SHEETDB_ENDPOINT}/search?username=${username}`)
+          .then(response => response.json());
+
+        if (existingUsers.length > 0) {
+          throw new Error("Username already taken.");
+        }
+
+        const hashedPassword = await hashPassword(password);
+
+        const newUser = {
+          username,
+          email,
+          password_hashed: hashedPassword
+        };
+
+        const response = await fetch(SHEETDB_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(AUTH_TOKEN && { "Authorization": `Bearer ${AUTH_TOKEN}` })
+          },
+          body: JSON.stringify(newUser)
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || "Error registering user.");
+
+        return "Registration successful!";
+      } catch (error) {
+        console.error("Error during registration:", error);
+        throw new Error(error.message || "An error occurred.");
+      }
+    }
+
+    // Función de inicio de sesión
+    async function loginUser(username, password) {
+      try {
+        const users = await fetch(`${SHEETDB_ENDPOINT}/search?username=${username}`)
+          .then(response => response.json());
+
+        if (users.length === 0) {
+          throw new Error("User not found.");
+        }
+
+        const user = users[0];
+        const hashedPassword = await hashPassword(password);
+
+        if (hashedPassword !== user.password_hashed) {
+          throw new Error("Incorrect password.");
+        }
+
+        Cookies.set('user_session', username, { expires: 7, path: '' });
+        return "Login successful!";
+      } catch (error) {
+        console.error("Error during login:", error);
+        throw new Error(error.message || "An error occurred during login.");
+      }
+    }
+
+    // Registro
+    document.getElementById("registerButton").addEventListener("click", async () => {
+      const username = document.getElementById("registerUsername").value;
+      const email = document.getElementById("registerEmail").value;
+      const password = document.getElementById("registerPassword").value;
+
+      if (!username || !email || !password) {
+        document.getElementById("registerMessage").innerText = "Please fill all fields.";
+        return;
+      }
+
+      try {
+        const message = await registerUser(username, email, password);
+        document.getElementById("registerMessage").innerText = message;
+      } catch (error) {
+        document.getElementById("registerMessage").innerText = error.message;
+      }
+    });
+
+    // Login
+    document.getElementById("loginButton").addEventListener("click", async () => {
+      const username = document.getElementById("loginUsername").value;
+      const password = document.getElementById("loginPassword").value;
+
+      if (!username || !password) {
+        document.getElementById("loginMessage").innerText = "Please fill all fields.";
+        return;
+      }
+
+      try {
+        const message = await loginUser(username, password);
+        document.getElementById("loginMessage").innerText = message;
+      } catch (error) {
+        document.getElementById("loginMessage").innerText = error.message;
+      }
+    });
+
+    // Toggle entre los formularios de login y registro
+    document.getElementById("showLoginForm").addEventListener("click", () => {
+      document.getElementById("registerForm").style.display = "none";
+      document.getElementById("loginForm").style.display = "block";
+    });
+
+    document.getElementById("showRegisterForm").addEventListener("click", () => {
+      document.getElementById("loginForm").style.display = "none";
+      document.getElementById("registerForm").style.display = "block";
+    });
+  </script>
+
+</body>
+</html>
